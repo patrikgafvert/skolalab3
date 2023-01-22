@@ -1,0 +1,76 @@
+vm_name = "Ubuntu 22.04.1 LTS Star 3"
+vm_host_name = "exaplify"
+vm_script_name = "VMScript.sh"
+vm_image = "ubuntu/jammy64"
+
+Vagrant.configure("2") do | config |
+	config.vm.box = vm_image
+	config.vm.hostname = vm_host_name
+	config.vm.network "forwarded_port", guest: 3000, host: 3000, host_ip: "127.0.0.1"	
+#	config.vm.network "public_network", bridge: "enp0s31f6"
+#	config.vm.network "public_network", bridge: "wlp1s0"
+
+	config.vm.define vm_name
+	config.vm.synced_folder '.', '/vagrant', disabled: true
+	config.vm.box_check_update = false
+	config.vm.provider "virtualbox" do | vb | 
+		vb.name = vm_name
+		vb.gui = false
+		vb.check_guest_additions = false
+		vb.memory = 4096
+		vb.default_nic_type = "virtio"
+		vb.customize ["modifyvm", :id, "--graphicscontroller", "none"]
+		vb.customize ["modifyvm", :id, "--audio", "none"]
+		vb.customize ["modifyvm", :id, "--boot1", "disk"]
+		vb.customize ["modifyvm", :id, "--boot2", "none"]
+		vb.customize ["modifyvm", :id, "--boot3", "none"]
+		vb.customize ["modifyvm", :id, "--boot4", "none"]
+		vb.customize ["modifyvm", :id, "--uart1", "off"]
+		vb.customize ["modifyvm", :id, "--uart2", "off"]
+		vb.customize ["modifyvm", :id, "--uart3", "off"]
+		vb.customize ["modifyvm", :id, "--uart4", "off"]
+		vb.customize ["modifyvm", :id, "--keyboard", "none"]
+		vb.customize ["modifyvm", :id, "--mouse", "none"]
+		vb.customize ["modifyvm", :id, "--usb-ehci", "off"]
+		vb.customize ["modifyvm", :id, "--usb-ohci", "off"]
+		vb.customize ["modifyvm", :id, "--usb-xhci", "off"]
+		vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+
+	end
+	config.vm.provision "file", source: "./Dockerfile", destination: "Dockerfile"
+	config.vm.provision "file", source: "./docker-compose.yml", destination: "docker-compose.yml"
+	config.vm.provision "shell", name: "Startup", keep_color: true, inline: <<-SCRIPT
+		#/usr/bin/env bash
+		
+		if [ ! -f updateinstallflag ]; then
+			apt-get update
+			# ------------ Start Install Docker in the VM.
+			apt-get install -y ca-certificates curl gnupg lsb-release
+			mkdir -p /etc/apt/keyrings
+			curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+			echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+			apt-get update
+			apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+			# ------------ End Install Docker in the VM.
+			touch updateinstallflag
+		fi
+		
+		# Add user vagrant to docker group for more easy access in this development env (security risk)
+		usermod -aG docker vagrant
+
+		# Make gitea persistent data vol for docker.
+		
+		if [ ! -d gitea ]; then
+			su - vagrant -c 'mkdir gitea'
+		fi
+
+		# Make mysql persistent data vol for docker.
+		if [ ! -d mysql ]; then
+			su - vagrant -c 'mkdir mysql'
+		fi
+		
+		su - vagrant -c 'docker build -t gitea:local .'
+		su - vagrant -c 'docker compose up -d'
+
+	SCRIPT
+end
